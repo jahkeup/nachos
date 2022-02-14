@@ -1,65 +1,71 @@
-// This package provides a simple example of how nachos are used. The correct
-// answer is that nachos are always wonderful and should work on all platforms.
-// Can't say the same for the output of nachos. Ha.
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
-	"io/fs"
+	"log"
 	"os"
-
-	"github.com/jahkeup/nachos"
 )
 
-const (
-	defaultPath = "./bin-universal"
-)
+var errUsage = errors.New("usage error")
+var errRun = errors.New("run error")
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "writing to default path: %s\n", defaultPath)
-		os.Args = append(os.Args, defaultPath)
-	} else {
-		fmt.Fprintf(os.Stderr, "writing to path: %s\n", os.Args[1])
+	log.SetFlags(log.Ltime | log.Lshortfile)
+
+	err := _main()
+	switch {
+	case err == nil:
+		os.Exit(0)
+	case errors.Is(err, errUsage):
+		os.Exit(2)
+	case errors.Is(err, errRun):
+		os.Exit(1)
+	default:
+		os.Exit(3)
+	}
+}
+
+func _main() error {
+	cli, fs := NewCLI()
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		log.Println("invalid arguments")
+		fs.Usage()
+		return errUsage
+	}
+	cli.Inputs = fs.Args()
+
+	fsys := os.DirFS(".")
+
+	if err := assertValidInputs(fsys, cli.Inputs); err != nil {
+		log.Printf("invalid inputs: %s", err)
+		fs.Usage()
+		return fmt.Errorf("assertValidInputs: %w", errRun)
+	}
+	if err := assertValidOutput(fsys, cli); err != nil {
+		log.Printf("invalid output: %s", err)
+		fs.Usage()
+		return errUsage
 	}
 
-	arm, err := os.OpenFile("./bin-arm64", os.O_RDONLY, 0)
+	log.Printf("building universal binary from %q", cli.Inputs)
+	rdc, err := run(fsys, cli)
 	if err != nil {
-		panic(err)
+		log.Printf("failed to build: %s", err)
+		return errRun
 	}
-	defer arm.Close()
+	defer rdc.Close()
 
-	amd, err := os.OpenFile("./bin-x86_64", os.O_RDONLY, 0)
+	outputName := cli.GetOutputName()
+	log.Printf("writing output to %q", outputName)
+	output, err := os.OpenFile(cli.GetOutputName(), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o0755)
 	if err != nil {
-		panic(err)
+		log.Printf("failed to write output file: %s", err)
+		return errRun
 	}
-	defer amd.Close()
+	defer output.Close()
+	io.Copy(output, rdc)
 
-	files := []fs.File{arm, amd}
-	exes := []nachos.Executable{}
-	for i := range files {
-		exe, err := nachos.NewFileExe(files[i])
-		if err != nil {
-			panic(err)
-		}
-		exes = append(exes, exe)
-	}
-
-	wr, err := nachos.NewUniversalBinary(exes...)
-	if err != nil {
-		panic(err)
-	}
-
-	out, err := os.OpenFile(os.Args[1], os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0755)
-	if err != nil {
-		panic(err)
-	}
-	defer out.Close()
-
-	_, err = io.Copy(out, wr)
-	if err != nil {
-		panic(err)
-	}
-
+	return nil
 }

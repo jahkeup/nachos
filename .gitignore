@@ -4,3 +4,4 @@ tmp/
 bin-*
 .envrc
 *.tar.*
+/bin
