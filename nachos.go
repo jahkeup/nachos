@@ -74,7 +74,7 @@ func NewFileExe(f fs.File) (*fileExe, error) {
 	case io.ReaderAt:
 		rd = io.NewSectionReader(v, 0, sz)
 	default:
-		rd = io.LimitReader(rd, sz)
+		rd = io.LimitReader(v, sz)
 	}
 
 	if err := binary.Read(rd, headerEndianness, &hdr); err != nil {
