@@ -68,6 +68,9 @@ func NewFileExe(f fs.File) (*fileExe, error) {
 
 	hdr := macho.FileHeader{}
 	sz := int64(binary.Size(hdr))
+	if sz > stat.Size() {
+		return nil, errors.New("mismatch between header and actual binary file size")
+	}
 
 	var rd io.Reader
 	switch v := f.(type) {
