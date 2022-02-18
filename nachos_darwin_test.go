@@ -1,16 +1,100 @@
-//go:build darwin
-// +build darwin
-
 package nachos
 
 import (
-	"runtime"
+	"context"
+	"io"
+	"io/fs"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/jahkeup/nachos/internal/testing/bins"
 )
 
-// TestAssertDarwin verifies the test run on darwin.
-func TestAssertDarwin(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Fatal("must only run on darwin")
+func TestExecuteUniversalBinary(t *testing.T) {
+	type input struct {
+		Name string
+		File fs.File
+		Size int64
+	}
+	var inputs []*input
+
+	amd64, err := bins.FS.Open(bins.AMD64BinaryName)
+	if err != nil {
+		t.Fatalf("required bin stub not present: %s", err)
+	}
+	if stat, err := amd64.Stat(); err != nil {
+		t.Fatalf("required bin stub stat errox: %s", err)
+	} else {
+		inputs = append(inputs, &input{
+			Name: stat.Name(),
+			File: amd64,
+			Size: stat.Size(),
+		})
+	}
+
+	arm64, err := bins.FS.Open(bins.ARM64BinaryName)
+	if err != nil {
+		t.Fatalf("required bin stub not present: %s", err)
+	}
+	if stat, err := arm64.Stat(); err != nil {
+		t.Fatalf("required bin stub stat errox: %s", err)
+	} else {
+		inputs = append(inputs, &input{
+			Name: stat.Name(),
+			File: amd64,
+			Size: stat.Size(),
+		})
+	}
+
+	var execs []Executable
+
+	for i := range inputs {
+		input := inputs[i]
+		ef, err := NewFileExe(input.File)
+		if err != nil {
+			t.Errorf("cannot use stub %q as file exe: %s", input.Name, err)
+		}
+		execs = append(execs, ef)
+	}
+
+	if len(execs) != 2 {
+		t.Fatal("cannot use stubs in test")
+	}
+
+	rdc, err := NewUniversalBinary(execs...)
+	if err != nil {
+		t.Fatalf("cannot build universal binary")
+	}
+	defer rdc.Close()
+
+	outdir := t.TempDir()
+	binPath := filepath.Join(outdir, "universal-bin")
+	out, err := os.OpenFile(binPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o0755)
+	if err != nil {
+		t.Fatalf("could not open output file to run with: %s", err)
+	}
+	_, err = io.Copy(out, rdc)
+	out.Close()
+	if err != nil {
+		t.Fatalf("could not write binary: %s", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	t.Cleanup(cancel)
+	cmd := exec.CommandContext(ctx, binPath)
+
+	procText, err := cmd.CombinedOutput()
+	t.Logf("command output: %s", string(procText))
+	if err != nil {
+		t.Errorf("command errored: %s", err)
+	}
+
+	diagCmd := exec.CommandContext(ctx, "file", binPath)
+	binMagic, err := diagCmd.CombinedOutput()
+	if err == nil {
+		t.Logf("%q: %s", diagCmd.String(), string(binMagic))
 	}
 }
