@@ -66,13 +66,13 @@ func TestExecuteUniversalBinary(t *testing.T) {
 
 	rdc, err := NewUniversalBinary(execs...)
 	if err != nil {
-		t.Errorf("cannot build universal binary")
-		return
+		t.Fatalf("cannot build universal binary")
 	}
 	defer rdc.Close()
 
 	outdir := t.TempDir()
-	out, err := os.OpenFile(filepath.Join(outdir, "universal-bin"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o0755)
+	binPath := filepath.Join(outdir, "universal-bin")
+	out, err := os.OpenFile(binPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o0755)
 	if err != nil {
 		t.Fatalf("could not open output file to run with: %s", err)
 	}
@@ -84,11 +84,17 @@ func TestExecuteUniversalBinary(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	t.Cleanup(cancel)
-	cmd := exec.CommandContext(ctx, filepath.Join(outdir, "universal-bin"))
+	cmd := exec.CommandContext(ctx, binPath)
 
 	procText, err := cmd.CombinedOutput()
 	t.Logf("command output: %s", string(procText))
 	if err != nil {
-		t.Fatalf("command errored: %s", err)
+		t.Errorf("command errored: %s", err)
+	}
+
+	diagCmd := exec.CommandContext(ctx, "file", binPath)
+	binMagic, err := diagCmd.CombinedOutput()
+	if err == nil {
+		t.Logf("%q: %s", diagCmd.String(), string(binMagic))
 	}
 }
